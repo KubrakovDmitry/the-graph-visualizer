@@ -1,15 +1,14 @@
+import base64
+import io
 import json
+import math
 from collections import defaultdict
 
 import networkx as nx
 import plotly.graph_objects as go
 from dash import (Dash, dcc, html, Input, Output, State, ctx,
-                #   clientside_callback,
                   no_update)
 
-
-with open("spironolacton_lizinopril.json", encoding="utf-8") as f:
-    data = json.load(f)
 
 COLORS = {
     'prepare': 'green',
@@ -22,35 +21,27 @@ COLORS = {
     'noun': 'gray',
     'side_e': 'red'
 }
-
 graph = nx.DiGraph()
-for node in data['nodes']:
-    graph.add_node(node['id'],
-                   name=node.get('name'),
-                   label=node.get('label', ''),
-                   level=node.get('level', 1))
-for link in data['links']:
-    graph.add_edge(link['source'], link['target'])
+pos: dict = {}
 
 
-def layered_pos(graph, y_gap=200, x_gap=100):
-    level_nodes = defaultdict(list)
-    for node, attr in graph.nodes(data=True):
-        level = attr.get('level', 0)
-        level_nodes[level].append(node)
-
-    pos = {}
-    for level in sorted(level_nodes):
-        nodes = level_nodes[level]
-        count = len(nodes)
-        for i, node in enumerate(nodes):
-            x = i * x_gap - (count - 1) * x_gap / 2
-            y = -level * y_gap
-            pos[node] = (x, y)
-    return pos
-
-
-pos = layered_pos(graph)
+def empty_figure_with_message(message='Загрузите JSON-файл с графом'):
+    return go.Figure(
+        layout=go.Layout(
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            annotations=[
+                dict(
+                    text=message,
+                    xref='paper', yref='paper',
+                    showarrow=False,
+                    font=dict(size=20),
+                    x=0.5, y=0.5,
+                    align='center'
+                )
+            ]
+        )
+    )
 
 
 def build_figure(highlight_path=None):
@@ -157,13 +148,62 @@ def find_path_from_root(target):
     return []
 
 
+def layered_pos(graph, y_gap=200, x_gap=100):
+    level_nodes = defaultdict(list)
+    for node, attr in graph.nodes(data=True):
+        level = attr.get('level', 0)
+        level_nodes[level].append(node)
+
+    pos = {}
+    for level in sorted(level_nodes):
+        nodes = level_nodes[level]
+        count = len(nodes)
+        for i, node in enumerate(nodes):
+            x = i * x_gap - (count - 1) * x_gap / 2
+            y = -level * y_gap
+            pos[node] = (x, y)
+    return pos
+
+
+def process_and_draw(data):
+    global graph, pos
+
+    graph.clear()
+    for node in data['nodes']:
+        graph.add_node(node['id'],
+                       name=node.get('name'),
+                       label=node.get('label', ''),
+                       level=node.get('level', 1))
+    for link in data['links']:
+        if link['source'] in graph.nodes and link['target'] in graph.nodes:
+            graph.add_edge(link['source'], link['target'])
+        else:
+            print(f'Пропущено ребро: {link}')
+    pos = layered_pos(graph)
+    return build_figure()
+
+
 # Dash
 app = Dash(__name__)
 
 app.layout = html.Div([
-    dcc.Graph(id='graph', figure=build_figure()),
+    dcc.Upload(
+        id='upload-data',
+        children=html.Div([
+            'Перетащите файл сюда или ',
+            html.A('выберите')
+        ]),
+        style={
+            'width': '100%', 'height': '60px', 'lineHeight': '60px',
+            'borderWidth': '1px', 'borderStyle': 'dashed',
+            'borderRadius': '5px', 'textAlign': 'center',
+            'margin': '10px'
+        },
+        multiple=False
+    ),
+    dcc.Loading(dcc.Graph(id='graph', figure=empty_figure_with_message()),
+                type='circle'),
     dcc.Store(id='selected-node'),
-    # dcc.Store(id='reset-request', data=False),
     html.Button(id='reset-btn', style={'display': 'none'}),
     html.Script('''
         document.addEventListener('keydown', function(e) {
@@ -175,42 +215,46 @@ app.layout = html.Div([
 ])
 
 
-# clientside_callback(
-#     """
-#     function(n_clicks) {
-#         return true;
-#     }
-#     """,
-#     Output('reset-request', 'data'),
-#     Input('graph', 'n_clicks'),
-#     prevent_initial_call=True,
-# )
-
-
 @app.callback(
     Output('graph', 'figure'),
     Output('selected-node', 'data'),
+    Input('upload-data', 'contents'),
+    Input('upload-data', 'filename'),
     Input('graph', 'clickData'),
     Input('reset-btn', 'n_clicks'),
     State('selected-node', 'data')
 )
-def update_graph(clickData, reset_clicks, selected_node):
+def render_graph(upload_contents, upload_filename, clickData, reset_clicks,
+                 selected_node):
     trigger = ctx.triggered_id
+    print(f"Triggered by: {trigger}")
 
-    if trigger == 'reset-btn':
+    if trigger == 'upload-data' and upload_contents:
+        print("Загрузка файла")
+        try:
+            _, content_string = upload_contents.split(',')
+            decoded = base64.b64decode(content_string)
+            loaded_data = json.load(io.StringIO(decoded.decode('utf-8')))
+            return process_and_draw(loaded_data), None
+        except Exception as e:
+            print('Ошибка при чтении файла:', e)
+            return empty_figure_with_message("Ошибка при чтении файла"), None
+
+    elif trigger == 'reset-btn':
         return build_figure(), None
 
-    if clickData:
+    elif trigger == 'graph' and clickData:
         point = clickData['points'][0]
         x = point['x']
         y = point['y']
+        for node, (x_node, y_node) in pos.items():
+            if math.hypot(x - x_node, y - y_node) < 15:
+                if abs(x - x_node) < 10 and abs(y - y_node) < 10:
+                    if node == selected_node:
+                        return build_figure(), None
+                    path = find_path_from_root(node)
+                    return build_figure(path), node
 
-        for node, (nx, ny) in pos.items():
-            if abs(x - nx) < 10 and abs(y - ny) < 10:
-                if node == selected_node:
-                    return build_figure(), None
-                path = find_path_from_root(node)
-                return build_figure(path), node
     return no_update
 
 
