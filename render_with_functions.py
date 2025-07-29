@@ -6,8 +6,7 @@ from collections import defaultdict
 
 import networkx as nx
 import plotly.graph_objects as go
-from dash import (Dash, dcc, html, Input, Output, State, ctx,
-                  no_update)
+from dash import (Dash, dcc, html, Input, Output, State, ctx, no_update)
 
 
 COLORS = {
@@ -44,18 +43,20 @@ def empty_figure_with_message(message='Загрузите JSON-файл с гр�
     )
 
 
-def build_figure(highlight_path=None):
+def build_figure(highlight_paths=None):
     edge_x, edge_y = [], []
     node_x, node_y = [], []
     node_text, node_color, node_opacity = [], [], []
 
-    highlight_nodes = set(highlight_path or [])
+    highlight_nodes = set()
     highlight_edges = set()
 
     # Определим рёбра на пути
-    if highlight_path and len(highlight_path) > 1:
-        highlight_edges = {(highlight_path[i], highlight_path[i+1])
-                           for i in range(len(highlight_path)-1)}
+    if highlight_paths:
+        for path in highlight_paths:
+            highlight_nodes.update(path)
+            highlight_edges.update((path[i], path[i+1])
+                                   for i in range(len(path)-1))
 
     # Рёбра
     for src, tgt in graph.edges():
@@ -69,9 +70,10 @@ def build_figure(highlight_path=None):
         line=dict(width=1, color='lightgray'),
         hoverinfo='none',
         mode='lines',
-        opacity=0.3 if highlight_path else 1
+        opacity=0.3 if highlight_nodes else 1
     )
 
+    edge_highlight = None
     if highlight_edges:
         hx, hy = [], []
         for src, tgt in highlight_edges:
@@ -87,8 +89,6 @@ def build_figure(highlight_path=None):
             mode='lines',
             opacity=1
         )
-    else:
-        edge_highlight = None
 
     for node in graph.nodes():
         x, y = pos[node]
@@ -96,7 +96,7 @@ def build_figure(highlight_path=None):
         label = graph.nodes[node].get('label', '')
         color = COLORS.get(label, 'lightgray')
 
-        is_highlighted = not highlight_path or node in highlight_nodes
+        is_highlighted = not highlight_nodes or node in highlight_nodes
         opacity = 1.0 if is_highlighted else 0.1
 
         node_x.append(x)
@@ -137,25 +137,19 @@ def build_figure(highlight_path=None):
     return fig
 
 
-def find_path_from_roots(target):
-    # Ищем любую вершину без входящих рёбер — корень
+def find_path_from_roots(start_node):
     roots = [n for n in graph.nodes if graph.in_degree(n) == 0]
+    reverse_g = graph.reverse()
+
     all_paths = []
     for root in roots:
         try:
-            paths = nx.shortest_simple_paths(graph, root, target)
+            paths = nx.shortest_simple_paths(reverse_g, start_node, root)
             for path in paths:
                 all_paths.append(path)
         except nx.NetworkXNoPath:
             continue
     return all_paths
-    # roots = [n for n in graph.nodes if graph.in_degree(n) == 0]
-    # for root in roots:
-    #     try:
-    #         return nx.shortest_path(graph, root, target)
-    #     except nx.NetworkXNoPath:
-    #         continue
-    # return []
 
 
 def layered_pos(graph, y_gap=200, x_gap=100):
@@ -193,7 +187,6 @@ def process_and_draw(data):
     return build_figure()
 
 
-# Dash
 app = Dash(__name__)
 
 app.layout = html.Div([
@@ -227,16 +220,8 @@ app.layout = html.Div([
     dcc.Loading(dcc.Graph(id='graph', figure=empty_figure_with_message()),
                 type='circle'),
     dcc.Store(id='selected-node'),
-    # html.Button(id='reset-btn', style={'display': 'none'}),
     dcc.Store(id='esc-pressed', data=False),
     dcc.Interval(id='interval-esc', interval=500, n_intervals=0),
-    # html.Script('''
-    #     document.addEventListener('keydown', function(e) {
-    #         if (e.key === 'Escape') {
-    #             document.getElementById('reset-btn')?.click();
-    #         }
-    #     });
-    # ''')
 ])
 
 app.clientside_callback(
@@ -260,8 +245,8 @@ app.clientside_callback(
         return window.dash_clientside.no_update;
     }
     """,
-    [Output('esc-pressed', 'data')],             # ✅ Только Store!
-    [Input('interval-esc', 'n_intervals')]       # Интервал нужен как триггер
+    [Output('esc-pressed', 'data')],
+    [Input('interval-esc', 'n_intervals')]
 )
 
 
@@ -273,13 +258,12 @@ app.clientside_callback(
     Input('upload-data', 'contents'),
     Input('upload-data', 'filename'),
     Input('graph', 'clickData'),
-    # Input('reset-btn', 'n_clicks'),
     Input('esc-pressed', 'data'),
     State('selected-node', 'data'),
     prevent_initial_call=True,
 )
-def render_graph(search_value, upload_contents, _upload_filename, clickData,
-                 esc_pressed,  selected_node):  # _reset_clicks,
+def render_graph(search_value, upload_contents, _, clickData, esc_pressed,
+                 selected_node):
     """Функция отрисовки графа."""
     trigger = ctx.triggered_id or 'initial'
 
@@ -287,6 +271,7 @@ def render_graph(search_value, upload_contents, _upload_filename, clickData,
         return build_figure(), None, ''
     elif trigger == 'upload-data' and upload_contents:
         print("Загрузка файла")
+
         try:
             _, content_string = upload_contents.split(',')
             decoded = base64.b64decode(content_string)
@@ -300,28 +285,24 @@ def render_graph(search_value, upload_contents, _upload_filename, clickData,
         for node, attr in graph.nodes(data=True):
             if attr.get('name', '').lower() == search_value.lower():
                 paths = find_path_from_roots(node)
-                all_nodes = set()
-                for p in paths:
-                    all_nodes.update(p)
-                return build_figure(list(all_nodes)), node, ''
+                return build_figure(paths), node, ''
+
         return build_figure(), None, (f'Вершина "{search_value}" '
                                       'не найдена в графе.')
     elif trigger == 'graph' and clickData:
         point = clickData['points'][0]
         x = point['x']
         y = point['y']
+
         for node, (x_node, y_node) in pos.items():
             if math.hypot(x - x_node, y - y_node) < 15:
                 if abs(x - x_node) < 10 and abs(y - y_node) < 10:
                     if node == selected_node:
                         return build_figure(), None, ''
-                    # path = find_path_from_root(node)
-                    # return build_figure(path), node, ''
+
                     paths = find_path_from_roots(node)
-                    all_nodes = set()
-                    for path in paths:
-                        all_nodes.update(path)
-                    return build_figure(list(all_nodes)), node, ''
+                    return build_figure(paths), node, ''
+
     return no_update
 
 
