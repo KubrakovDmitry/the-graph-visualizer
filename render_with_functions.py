@@ -55,8 +55,14 @@ def build_figure(highlight_paths=None):
     if highlight_paths:
         for path in highlight_paths:
             highlight_nodes.update(path)
-            highlight_edges.update((path[i], path[i+1])
-                                   for i in range(len(path)-1))
+            # highlight_edges.update((path[i], path[i+1])
+            #                        for i in range(len(path)-1))
+            for i in range(len(path) - 1):
+                src, tgt = path[i], path[i + 1]
+                if graph.has_edge(src, tgt):
+                    highlight_edges.add((src, tgt))
+                elif graph.has_edge(tgt, src):
+                    highlight_edges.add((tgt, src))
 
     # Рёбра
     for src, tgt in graph.edges():
