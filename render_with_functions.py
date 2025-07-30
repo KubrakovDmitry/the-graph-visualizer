@@ -73,22 +73,51 @@ def build_figure(highlight_paths=None):
         opacity=0.3 if highlight_nodes else 1
     )
 
-    edge_highlight = None
+    edge_highlight = []
+    annotations = []
     if highlight_edges:
-        hx, hy = [], []
         for src, tgt in highlight_edges:
             x0, y0 = pos[src]
             x1, y1 = pos[tgt]
-            hx += [x0, x1, None]
-            hy += [y0, y1, None]
 
-        edge_highlight = go.Scatter(
-            x=hx, y=hy,
-            line=dict(width=2, color='black'),
-            hoverinfo='none',
-            mode='lines',
-            opacity=1
-        )
+            # Вычисляем сокращение линии, чтобы стрелка не перекрывала узел
+            dx = x1 - x0
+            dy = y1 - y0
+            dist = math.hypot(dx, dy)
+            shrink = 15
+            if dist != 0:
+                x1_adj = x1 - dx / dist * shrink
+                y1_adj = y1 - dy / dist * shrink
+            else:
+                x1_adj, y1_adj = x1, y1
+
+            # Линия рёбра
+            edge_highlight.append(go.Scatter(
+                x=[x0, x1_adj],
+                y=[y0, y1_adj],
+                line=dict(width=2, color='black'),
+                mode='lines',
+                hoverinfo='none',
+                opacity=1,
+                showlegend=False
+            ))
+
+            annotations.append(dict(
+                x=x1_adj,
+                y=y1_adj,
+                ax=x0,
+                ay=y0,
+                xref='x',
+                yref='y',
+                axref='x',
+                ayref='y',
+                showarrow=True,
+                arrowhead=3,   # Стиль стрелки
+                arrowsize=1.5,
+                arrowwidth=1.5,
+                arrowcolor='black',
+                opacity=1
+            ))
 
     for node in graph.nodes():
         x, y = pos[node]
@@ -119,10 +148,7 @@ def build_figure(highlight_paths=None):
         )
     )
 
-    data = [edge_trace]
-    if edge_highlight:
-        data.append(edge_highlight)
-    data.append(node_trace)
+    data = [edge_trace] + edge_highlight + [node_trace]
 
     fig = go.Figure(
         data=data,
@@ -131,7 +157,8 @@ def build_figure(highlight_paths=None):
             hovermode='closest',
             margin=dict(b=20, l=5, r=5, t=40),
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            annotations=annotations
         )
     )
     return fig
