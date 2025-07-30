@@ -179,6 +179,23 @@ def find_path_from_roots(start_node):
     return all_paths
 
 
+def find_paths_to_descendants(start_node, max_depth=10):
+    paths = []
+
+    def dfs(node, path, depth):
+        if depth > max_depth:
+            return
+        neighbors = list(graph.successors(node))
+        for neighbor in neighbors:
+            if neighbor not in path:
+                new_path = path + [neighbor]
+                paths.append(new_path)
+                dfs(neighbor, new_path, depth+1)
+
+    dfs(start_node, [start_node], 0)
+    return paths
+
+
 def layered_pos(graph, y_gap=200, x_gap=100):
     level_nodes = defaultdict(list)
     for node, attr in graph.nodes(data=True):
@@ -311,7 +328,8 @@ def render_graph(search_value, upload_contents, _, clickData, esc_pressed,
     elif trigger == 'search-input' and search_value:
         for node, attr in graph.nodes(data=True):
             if attr.get('name', '').lower() == search_value.lower():
-                paths = find_path_from_roots(node)
+                paths = (find_path_from_roots(node) +
+                         find_paths_to_descendants(node))
                 return build_figure(paths), node, ''
 
         return build_figure(), None, (f'Вершина "{search_value}" '
@@ -327,7 +345,8 @@ def render_graph(search_value, upload_contents, _, clickData, esc_pressed,
                     if node == selected_node:
                         return build_figure(), None, ''
 
-                    paths = find_path_from_roots(node)
+                    paths = (find_path_from_roots(node) +
+                             find_paths_to_descendants(node))
                     return build_figure(paths), node, ''
 
     return no_update
