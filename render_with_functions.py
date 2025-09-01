@@ -132,8 +132,6 @@ def build_figure(highlight_paths=None):
         weight = graph.nodes[node].get('weight', '')
         color = COLORS.get(label, 'lightgray')
 
-        print(f'graph.nodes[node] = {graph.nodes[node]}')
-
         is_highlighted = not highlight_nodes or node in highlight_nodes
         opacity = 1.0 if is_highlighted else 0.1
 
