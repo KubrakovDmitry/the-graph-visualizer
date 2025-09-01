@@ -129,7 +129,10 @@ def build_figure(highlight_paths=None):
         x, y = pos[node]
         name = graph.nodes[node].get('name', '')
         label = graph.nodes[node].get('label', '')
+        weight = graph.nodes[node].get('weight', '')
         color = COLORS.get(label, 'lightgray')
+
+        print(f'graph.nodes[node] = {graph.nodes[node]}')
 
         is_highlighted = not highlight_nodes or node in highlight_nodes
         opacity = 1.0 if is_highlighted else 0.1
@@ -137,7 +140,7 @@ def build_figure(highlight_paths=None):
         node_x.append(x)
         node_y.append(y)
         node_color.append(color)
-        node_text.append(name)
+        node_text.append(f"{name}<br>label: {label}<br>weight: {weight}")
         node_opacity.append(opacity)
 
     node_trace = go.Scatter(
@@ -227,7 +230,8 @@ def process_and_draw(data):
         graph.add_node(node['id'],
                        name=node.get('name'),
                        label=node.get('label', ''),
-                       level=node.get('level', 1))
+                       level=node.get('level', 1),
+                       weight=node.get('weight', ''))
     for link in data['links']:
         if link['source'] in graph.nodes and link['target'] in graph.nodes:
             graph.add_edge(link['source'], link['target'])
